@@ -1,9 +1,8 @@
 from pyspark import SparkContext
 from pyspark.sql import SQLContext, SparkSession
-from pyspark.sql.functions import udf, unbase64
+from pyspark.sql.functions import explode, udf, unbase64
 from pyspark.ml.feature import StopWordsRemover, Tokenizer
-import base64
-from base64 import  b64decode as decode
+import re
 
 l_file = [
     "./yelp-data/yelp_businesses.csv"
@@ -32,24 +31,8 @@ def get_stopword_list():
             stop_list.append(line.strip())
     return stop_list
 
-def strip_punc(string):
-    punc='!"#$%&()*+,-./:;<=>?@[\]^`{|}~'
-    for ch in punc:
-        string = string.replace(ch, '')
-    return string
-
-def sum_sentiment(value):
-    afinn = get_sentiment_dict()
-    total = 0
-    for word in value:
-        total += int(afinn.get(word,0))
-    return total
-
-#forrige øving
-def create_review_df(spark: SparkSession):
+def top_k_businesses(spark: SparkSession, k: int = 3):
     stopwords = get_stopword_list()
-    
-
     df = spark.read.csv(l_file[1],header=True,sep="\t")
     
     #unbase
@@ -64,26 +47,22 @@ def create_review_df(spark: SparkSession):
     remover = StopWordsRemover(inputCol="temp", outputCol="words", stopWords=stopwords)
     df = remover.transform(df)
     df = df.drop("temp")
+    df = df.select(df.business_id, explode(df.words))
 
     #punctuation
-    rdd = df.rdd.map(tuple)
-    rdd = rdd.map(lambda x: (x[2],[strip_punc(y) for y in x[4]]))
+    commaRep = udf(lambda x: re.sub(',$|^.','', x))
+    df = df.withColumn("col", commaRep(df["col"]))
 
     #sentiment
-    rdd = rdd.mapValues(lambda v: sum_sentiment(v))
-    sentiment_rdd = rdd.reduceByKey(lambda a,b: a+b)
-    sorted_rdd = sentiment_rdd.sortByKey(ascending=False)
+    afinn = get_sentiment_dict()
+    sentimentRep = udf(lambda x: afinn.get(x,0))
+    df = df.withColumn("col", sentimentRep(df["col"]))
 
-    print(sorted_rdd.take(3))
-    
-
-
-def tokenize_review(review):
-    tokenized = 2
-
+    #summing on business
+    df = df.groupBy("business_id")
+    df.agg({'col':'sum'}).orderBy("sum(col)",ascending=False).show(k)
 
 spark = SparkSession.builder.appName("hello_dataframe").config("spark.some.config.option", "some-value").getOrCreate()
-df = create_review_df(spark)
+df = top_k_businesses(spark)
 
-#sentiment_dict = get_sentiment_dict()
 
