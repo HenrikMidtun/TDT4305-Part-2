@@ -27,7 +27,6 @@ def get_stopword_list():
     return stop_list
 
 def top_k_businesses(spark: SparkSession, k: int = 3, ascending: bool = False):
-    stopwords = get_stopword_list()
     df = spark.read.csv(l_file[1],header=True,sep="\t")
     
     #unbase
@@ -39,6 +38,7 @@ def top_k_businesses(spark: SparkSession, k: int = 3, ascending: bool = False):
     df = df.drop("review_text")
 
     #stopwords
+    stopwords = get_stopword_list()
     remover = StopWordsRemover(inputCol="temp", outputCol="words", stopWords=stopwords)
     df = remover.transform(df)
     df = df.drop("temp")
